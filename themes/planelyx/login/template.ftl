@@ -35,7 +35,7 @@
             // Runs synchronously, before any stylesheet paints, so there's no
             // flash of the wrong theme. Toggled later by #ft-theme-toggle;
             // see the module script near the end of <head> for that wiring.
-            var stored = localStorage.getItem("ft-theme");
+            var stored = localStorage.getItem("planelyx.theme");
             var dark = stored ? stored === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
             var classList = document.documentElement.classList;
             classList.toggle("ft-dark", dark);
@@ -92,7 +92,7 @@
         // explicitly — once they use the toggle, their choice sticks.
         const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
         mediaQuery.addEventListener("change", (event) => {
-          if (!localStorage.getItem("ft-theme")) {
+          if (!localStorage.getItem("planelyx.theme")) {
             applyTheme(event.matches);
           }
         });
@@ -106,7 +106,7 @@
         window.ftToggleTheme = function ftToggleTheme() {
           const isDark = !document.documentElement.classList.contains("ft-dark");
           applyTheme(isDark);
-          localStorage.setItem("ft-theme", isDark ? "dark" : "light");
+          localStorage.setItem("planelyx.theme", isDark ? "dark" : "light");
         };
     </script>
 </head>
