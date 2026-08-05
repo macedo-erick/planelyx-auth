@@ -22,10 +22,38 @@
       "standardFlowEnabled": true,
       "serviceAccountsEnabled": false,
       "rootUrl": "${PLANELYX_UI_BASE_URL:http://localhost:4200}",
-      "redirectUris": ["${PLANELYX_UI_BASE_URL:http://localhost:4200}/*"],
-      "webOrigins": ["${PLANELYX_UI_ORIGIN:http://localhost:4200}"],
+      "redirectUris": [
+        "${PLANELYX_UI_BASE_URL:http://localhost:4200}/*"
+      ],
+      "webOrigins": [
+        "${PLANELYX_UI_ORIGIN:http://localhost:4200}"
+      ],
       "attributes": {
         "post.logout.redirect.uris": "${PLANELYX_UI_BASE_URL:http://localhost:4200}/*"
+      }
+    },
+    {
+      "clientId": "planelyx-api-admin",
+      "enabled": true,
+      "description": "Service account the API uses to read and update the signed-in user's own profile.",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "${PLANELYX_KEYCLOAK_ADMIN_CLIENT_SECRET:local-dev-secret}"
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-planelyx-api-admin",
+      "enabled": true,
+      "serviceAccountClientId": "planelyx-api-admin",
+      "clientRoles": {
+        "realm-management": [
+          "view-users",
+          "manage-users"
+        ]
       }
     }
   ]

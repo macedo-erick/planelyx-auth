@@ -15,16 +15,32 @@ theme edits need a rebuild here.
 
 ## Configuration
 
-Runtime env vars are set by `compose.prod.yaml` in `planelyx-infra`. Two matter for the
+Runtime env vars are set by `compose.prod.yaml` in `planelyx-infra`. Three matter for the
 realm import:
 
 | Variable | Local | Production | Used for |
 |---|---|---|---|
 | `PLANELYX_UI_ORIGIN` | `http://localhost:4200` | `https://planelyx.com` | `webOrigins` — must be a bare origin, no path |
 | `PLANELYX_UI_BASE_URL` | `http://localhost:4200` | `https://planelyx.com/ui` | `rootUrl`, `redirectUris`, post-logout URIs — includes the base path |
+| `PLANELYX_KEYCLOAK_ADMIN_CLIENT_SECRET` | `local-dev-secret` | *(generate one)* | secret of the `planelyx-api-admin` client |
 
-They are split because `webOrigins` is a CORS origin and rejects a path, while redirect
-URIs must carry the `/ui` base href the SPA is served under.
+The first two are split because `webOrigins` is a CORS origin and rejects a path, while
+redirect URIs must carry the `/ui` base href the SPA is served under.
+
+## Clients
+
+| Client | Type | Used by |
+|---|---|---|
+| `planelyx-api` | public, standard flow + PKCE | the Angular app, to sign users in |
+| `planelyx-api-admin` | confidential, service account only | the API, to read and update the signed-in user's own profile |
+
+`planelyx-api-admin` holds the `realm-management` roles `view-users` and `manage-users`,
+granted through the seeded `service-account-planelyx-api-admin` user in the export. The API
+reads its secret from `KEYCLOAK_ADMIN_CLIENT_SECRET`; without it `GET`/`PUT /api/me` fail and
+the app's profile page cannot load.
+
+**On an existing realm this client will not appear** — see the warning below. Create it by
+hand and copy its generated secret into the API's environment.
 
 ## ⚠️ The realm imports exactly once
 
