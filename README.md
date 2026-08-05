@@ -3,7 +3,7 @@
 Keycloak image for Planelyx: the realm definition plus the custom `planelyx` login theme,
 baked into a production-mode image.
 
-Deployed at `https://planelyx.com/auth` — see `DEPLOYMENT.md` in `planelyx-api` for the
+Deployed at `https://planelyx.com/auth` — see `DEPLOYMENT.md` in `planelyx-infra` for the
 full runbook.
 
 ## Why an image rather than the stock one
