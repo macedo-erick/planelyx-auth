@@ -1,0 +1,32 @@
+{
+  "realm": "planelyx",
+  "enabled": true,
+  "displayName": "Planelyx",
+  "displayNameHtml": "Planelyx",
+  "loginTheme": "planelyx",
+  "sslRequired": "external",
+  "accessTokenLifespan": 3600,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": false,
+  "passwordPolicy": "length(12) and digits(1) and lowerCase(1) and upperCase(1) and specialChars(1) and notUsername and notEmail",
+  "clients": [
+    {
+      "clientId": "planelyx-api",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "${PLANELYX_UI_BASE_URL:http://localhost:4200}",
+      "redirectUris": ["${PLANELYX_UI_BASE_URL:http://localhost:4200}/*"],
+      "webOrigins": ["${PLANELYX_UI_ORIGIN:http://localhost:4200}"],
+      "attributes": {
+        "post.logout.redirect.uris": "${PLANELYX_UI_BASE_URL:http://localhost:4200}/*"
+      }
+    }
+  ]
+}
