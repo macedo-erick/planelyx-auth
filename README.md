@@ -3,7 +3,7 @@
 Keycloak image for Planelyx: the realm definition plus the custom `planelyx` login theme,
 baked into a production-mode image.
 
-Deployed at `https://planelyx.com.br/auth` — see `DEPLOYMENT.md` in `planelyx-api` for the
+Deployed at `https://planelyx.com/auth` — see `DEPLOYMENT.md` in `planelyx-api` for the
 full runbook.
 
 ## Why an image rather than the stock one
@@ -20,8 +20,8 @@ realm import:
 
 | Variable | Local | Production | Used for |
 |---|---|---|---|
-| `PLANELYX_UI_ORIGIN` | `http://localhost:4200` | `https://planelyx.com.br` | `webOrigins` — must be a bare origin, no path |
-| `PLANELYX_UI_BASE_URL` | `http://localhost:4200` | `https://planelyx.com.br/ui` | `rootUrl`, `redirectUris`, post-logout URIs — includes the base path |
+| `PLANELYX_UI_ORIGIN` | `http://localhost:4200` | `https://planelyx.com` | `webOrigins` — must be a bare origin, no path |
+| `PLANELYX_UI_BASE_URL` | `http://localhost:4200` | `https://planelyx.com/ui` | `rootUrl`, `redirectUris`, post-logout URIs — includes the base path |
 
 They are split because `webOrigins` is a CORS origin and rejects a path, while redirect
 URIs must carry the `/ui` base href the SPA is served under.
