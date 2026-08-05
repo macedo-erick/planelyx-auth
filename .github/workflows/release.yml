@@ -11,7 +11,7 @@ permissions:
 
 env:
   REGION: southamerica-east1
-  REPOSITORY: planelyx
+  REPOSITORY: docker-remote-repo
   IMAGE: auth
 
 jobs:
