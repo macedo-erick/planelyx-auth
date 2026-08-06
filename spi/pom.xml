@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.planelyx</groupId>
+  <artifactId>planelyx-provisioning</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+  <name>Planelyx Keycloak provisioning event listener</name>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Matches the base image in ../Dockerfile. Bump both together, or the jar compiles
+         against one API and loads against another. -->
+    <keycloak.version>26.0.0</keycloak.version>
+  </properties>
+
+  <dependencies>
+    <!-- Every dependency here is `provided`: Keycloak already has these on its classpath, and
+         shipping copies inside the jar is how you get duplicate-class failures at `kc.sh build`.
+         That is also why the listener uses java.net.http and javax.crypto rather than pulling in
+         an HTTP or JSON library — the jar ends up with no runtime dependencies at all. -->
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-core</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-server-spi</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.keycloak</groupId>
+      <artifactId>keycloak-server-spi-private</artifactId>
+      <version>${keycloak.version}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jboss.logging</groupId>
+      <artifactId>jboss-logging</artifactId>
+      <version>3.5.3.Final</version>
+      <scope>provided</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <!-- Fixed name so ../Dockerfile can COPY it without a version glob. -->
+    <finalName>planelyx-provisioning</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>

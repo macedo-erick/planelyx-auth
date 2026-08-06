@@ -13,6 +13,10 @@
   "duplicateEmailsAllowed": false,
   "verifyEmail": false,
   "passwordPolicy": "length(12) and digits(1) and lowerCase(1) and upperCase(1) and specialChars(1) and notUsername and notEmail",
+  "eventsListeners": [
+    "jboss-logging",
+    "planelyx-provisioning"
+  ],
   "clients": [
     {
       "clientId": "planelyx-api",
