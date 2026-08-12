@@ -24,6 +24,7 @@ FROM quay.io/keycloak/keycloak:26.0 AS builder
 # :9000/auth/health/ready. Pinning it to / keeps health at :9000/health/ready.
 ENV KC_DB=postgres \
     KC_HEALTH_ENABLED=true \
+    KC_METRICS_ENABLED=true \
     KC_HTTP_RELATIVE_PATH=/auth \
     KC_HTTP_MANAGEMENT_RELATIVE_PATH=/
 
