@@ -1,5 +1,12 @@
 package com.planelyx.keycloak;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.jboss.logging.Logger;
 import org.keycloak.Config;
 import org.keycloak.events.EventListenerProvider;
@@ -9,9 +16,14 @@ import org.keycloak.models.KeycloakSessionFactory;
 
 /**
  * Registers the provisioning listener under the id {@code planelyx-provisioning}. That string is
- * what has to appear in the realm's Event listeners for any of this to run — and because
- * {@code --import-realm} skips a realm that already exists, adding it to the realm export only
+ * what has to appear in a realm's Event listeners for any of this to run — and because
+ * {@code --import-realm} skips a realm that already exists, adding it to a realm export only
  * takes effect on a realm built from scratch. An established realm has to be told once, by hand.
+ *
+ * <p>One server now serves a realm per product, so the callback target is per realm rather than
+ * per server: {@code PROVISIONING_<REALM>_URL} and {@code PROVISIONING_<REALM>_SECRET}, where
+ * {@code <REALM>} is the realm name upper-cased with every non-alphanumeric character replaced
+ * by an underscore. A realm with no pair configured never calls out.
  *
  * <p>Configuration comes from plain environment variables rather than {@code spi-events-listener-*}
  * options. Those options sit on the build-time/runtime boundary that {@code start --optimized}
@@ -25,44 +37,61 @@ public class ProvisioningEventListenerProviderFactory implements EventListenerPr
 
     private static final String ID = "planelyx-provisioning";
 
-    private static final String URL_ENV = "PLANELYX_PROVISIONING_URL";
+    private static final Pattern URL_ENV = Pattern.compile("^PROVISIONING_(.+)_URL$");
 
-    private static final String SECRET_ENV = "PLANELYX_PROVISIONING_SECRET";
+    private static final String SECRET_ENV_FORMAT = "PROVISIONING_%s_SECRET";
 
-    /** Null when the listener is unconfigured, which makes every callback a no-op. */
-    private ProvisioningNotifier notifier;
+    /** Keyed by {@link #realmKey(String)}. Empty when nothing is configured, which makes every callback a no-op. */
+    private Map<String, ProvisioningNotifier> notifiers = Collections.emptyMap();
 
     @Override
     public void init(Config.Scope config) {
-        String url = System.getenv(URL_ENV);
-        String secret = System.getenv(SECRET_ENV);
+        Map<String, ProvisioningNotifier> built = new LinkedHashMap<>();
 
-        // Deliberately not fatal. A missing variable should cost new users their default categories,
-        // not stop everyone from signing in.
-        if (isBlank(url) || isBlank(secret)) {
-            LOG.warnf("%s and %s are not both set — user provisioning callbacks are disabled", URL_ENV, SECRET_ENV);
-            return;
+        // Sorted so the startup log lists the realms in a stable order.
+        for (String name : new TreeSet<>(System.getenv().keySet())) {
+            Matcher matcher = URL_ENV.matcher(name);
+
+            if (!matcher.matches()) {
+                continue;
+            }
+
+            String key = matcher.group(1);
+            String url = System.getenv(name);
+            String secret = System.getenv(String.format(SECRET_ENV_FORMAT, key));
+
+            // Deliberately not fatal. A half-configured realm should cost its new users their
+            // default categories, not stop everyone on the server from signing in.
+            if (isBlank(url) || isBlank(secret)) {
+                LOG.warnf("PROVISIONING_%s_URL and PROVISIONING_%s_SECRET are not both set — "
+                        + "provisioning callbacks are disabled for that realm", key, key);
+                continue;
+            }
+
+            built.put(key, new ProvisioningNotifier(url, secret));
+            LOG.infof("User provisioning callbacks enabled for realm key %s, posting to %s", key, url);
         }
 
-        notifier = new ProvisioningNotifier(url, secret);
-        LOG.infof("User provisioning callbacks enabled, posting to %s", url);
+        if (built.isEmpty()) {
+            LOG.warn("No PROVISIONING_<REALM>_URL/_SECRET pair is set — user provisioning callbacks are disabled");
+        }
+
+        notifiers = built;
     }
 
     @Override
     public EventListenerProvider create(KeycloakSession session) {
-        return notifier != null ? new ProvisioningEventListenerProvider(session, notifier) : NoOp.INSTANCE;
+        return notifiers.isEmpty() ? NoOp.INSTANCE : new ProvisioningEventListenerProvider(session, notifiers);
     }
 
     @Override
     public void postInit(KeycloakSessionFactory factory) {
-        // Nothing to do; the notifier is fully built in init.
+        // Nothing to do; the notifiers are fully built in init.
     }
 
     @Override
     public void close() {
-        if (notifier != null) {
-            notifier.close();
-        }
+        notifiers.values().forEach(ProvisioningNotifier::close);
     }
 
     @Override
@@ -70,11 +99,16 @@ public class ProvisioningEventListenerProviderFactory implements EventListenerPr
         return ID;
     }
 
+    /** {@code planelyx} -> {@code PLANELYX}, so a realm name maps onto one environment variable name. */
+    static String realmKey(String realmName) {
+        return realmName.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9]", "_");
+    }
+
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
     }
 
-    /** Used when the listener is enabled on the realm but not configured on the server. */
+    /** Used when the listener is enabled on a realm but nothing is configured on the server. */
     private enum NoOp implements EventListenerProvider {
         INSTANCE;
 

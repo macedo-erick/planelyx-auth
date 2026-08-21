@@ -11,8 +11,8 @@ permissions:
 
 env:
   REGION: southamerica-east1
-  REPOSITORY: planelyx
-  IMAGE: auth
+  REPOSITORY: auth
+  IMAGE: keycloak
 
 jobs:
   build-push:
@@ -22,7 +22,7 @@ jobs:
 
       # Cheap guard: a malformed realm export only fails at Keycloak's first boot, which
       # is the single worst moment to find out.
-      - run: jq empty realm/realm-export.json
+      - run: for f in realms/*.json; do jq empty "$f"; done
 
       # Service-account JSON key. The key already identifies the account, so no
       # `service_account:` input here — that one is for impersonation.
