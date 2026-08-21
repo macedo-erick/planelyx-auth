@@ -37,9 +37,9 @@ RUN /opt/keycloak/bin/kc.sh build
 
 FROM quay.io/keycloak/keycloak:26.0
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
-COPY realm/realm-export.json /opt/keycloak/data/import/realm-export.json
+COPY realms/ /opt/keycloak/data/import/
 
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]
-# --import-realm is a no-op once the realm exists in the database. It only ever runs on
-# the very first boot against an empty `keycloak` DB.
+# --import-realm is a no-op for a realm that already exists in the database. It only ever
+# applies to a realm the `keycloak` DB has never seen.
 CMD ["start", "--optimized", "--import-realm"]

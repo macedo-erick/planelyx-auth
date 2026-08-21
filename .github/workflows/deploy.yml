@@ -1,0 +1,298 @@
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      auth_tag:
+        description: 'Keycloak image tag (commit SHA) — the release run prints it as AUTH_TAG=...'
+        type: string
+        required: true
+      allow_secret_change:
+        description: 'Allow credentials to differ from the VPS (credential rotation)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-auth-production
+  cancel-in-progress: false
+
+env:
+  REGION: southamerica-east1
+  REPOSITORY: auth
+  VPS_PATH: auth
+  ADMIN_URL: https://auth.macedosoftware.com
+  # Every origin Keycloak is served on, and the realm each one must issue for. Add a line here
+  # when a product joins; the smoke check asserts each pair resolves to its own issuer.
+  ISSUER_CHECKS: |
+    https://planelyx.com planelyx
+    https://auth.macedosoftware.com planelyx
+  WAIT_TIMEOUT: '300'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Validate inputs
+        env:
+          AUTH_TAG: ${{ inputs.auth_tag }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          KC_DB_PASSWORD: ${{ secrets.KC_DB_PASSWORD }}
+          KC_ADMIN: ${{ secrets.KC_ADMIN }}
+          KC_ADMIN_PASSWORD: ${{ secrets.KC_ADMIN_PASSWORD }}
+          KEYCLOAK_ADMIN_CLIENT_SECRET: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_SECRET }}
+          PLANELYX_PROVISIONING_SECRET: ${{ secrets.PLANELYX_PROVISIONING_SECRET }}
+          AUTH_LOG_LEVEL: ${{ vars.AUTH_LOG_LEVEL }}
+        run: |
+          set -euo pipefail
+          fail=0
+
+          if [[ ! $AUTH_TAG =~ ^[A-Za-z0-9._-]{1,128}$ ]]; then
+              echo "::error::'$AUTH_TAG' is not a valid image tag. Allowed: letters, digits, dot, underscore, hyphen (max 128)."
+              fail=1
+          fi
+
+          for name in GCP_PROJECT_ID KC_DB_PASSWORD KC_ADMIN KC_ADMIN_PASSWORD KEYCLOAK_ADMIN_CLIENT_SECRET PLANELYX_PROVISIONING_SECRET; do
+              value=${!name}
+              if [[ -z $value ]]; then
+                  echo "::error::Repo secret $name is empty or not set."
+                  fail=1
+              elif [[ $value == *"'"* ]]; then
+                  echo "::error::Repo secret $name contains a single quote, which cannot be represented in a Compose .env value. Regenerate it without one."
+                  fail=1
+              fi
+          done
+
+          if [[ -n ${AUTH_LOG_LEVEL:-} && ! ${AUTH_LOG_LEVEL^^} =~ ^(ALL|TRACE|DEBUG|INFO|WARN|ERROR|FATAL|OFF)$ ]]; then
+              echo "::error::Repo variable AUTH_LOG_LEVEL is '$AUTH_LOG_LEVEL'. Expected one of all trace debug info warn error fatal off."
+              fail=1
+          fi
+
+          (( fail == 0 )) || exit 1
+
+      - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          umask 077
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_SSH_KNOWN_HOSTS" > ~/.ssh/deploy_known_hosts
+
+          {
+              echo "SSH_OPTS=-o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/deploy_known_hosts -i $HOME/.ssh/deploy_key"
+              echo "REMOTE=$VPS_USER@$VPS_HOST"
+          } >> "$GITHUB_ENV"
+
+      - name: Ship compose.prod.yaml
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS "$REMOTE" "mkdir -p '$VPS_PATH'"
+          ssh $SSH_OPTS "$REMOTE" "cat > '$VPS_PATH/compose.prod.yaml.staged'" < compose.prod.yaml
+          echo "Shipped compose.prod.yaml from ${GITHUB_SHA:0:7}"
+
+      - name: Check for credential drift
+        if: ${{ !inputs.allow_secret_change }}
+        env:
+          KC_DB_PASSWORD: ${{ secrets.KC_DB_PASSWORD }}
+          KC_ADMIN: ${{ secrets.KC_ADMIN }}
+          KC_ADMIN_PASSWORD: ${{ secrets.KC_ADMIN_PASSWORD }}
+          KEYCLOAK_ADMIN_CLIENT_SECRET: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_SECRET }}
+          PLANELYX_PROVISIONING_SECRET: ${{ secrets.PLANELYX_PROVISIONING_SECRET }}
+        run: |
+          set -euo pipefail
+
+          env_exists=$(ssh $SSH_OPTS "$REMOTE" "test -f '$VPS_PATH/.env' && echo yes || echo no")
+
+          if [[ $env_exists == no ]]; then
+              echo "First deploy: no .env on the VPS yet, nothing to compare against."
+              exit 0
+          fi
+
+          read_env_key() {
+              ssh $SSH_OPTS "$REMOTE" "bash -s -- '$VPS_PATH' '$1'" <<'REMOTE_SCRIPT'
+          set -euo pipefail
+          cd "$1"
+          [[ -f .env ]] || exit 0
+          sed -n "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*//p" .env \
+              | tail -n1 \
+              | tr -d '\r' \
+              | sed -e 's/[[:space:]]*$//' -e "s/^'\(.*\)'\$/\1/" -e "s/^\"\(.*\)\"\$/\1/"
+          REMOTE_SCRIPT
+          }
+
+          fail=0
+
+          for name in KC_DB_PASSWORD KC_ADMIN KC_ADMIN_PASSWORD KEYCLOAK_ADMIN_CLIENT_SECRET PLANELYX_PROVISIONING_SECRET; do
+              on_vps=$(read_env_key "$name")
+              if [[ $on_vps != "${!name}" ]]; then
+                  echo "::error::Secret drift: $name differs between the repo secret and the VPS .env. If this is a deliberate rotation, re-run with 'Allow credentials to differ' ticked — and make sure the Postgres role, or planelyx-infra's copy of the shared secret, was changed to match."
+                  fail=1
+              fi
+          done
+
+          (( fail == 0 )) || exit 1
+          echo "No drift: the five credentials match what the VPS is already using."
+
+      - name: Stage the rendered .env
+        env:
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          KC_DB_PASSWORD: ${{ secrets.KC_DB_PASSWORD }}
+          KC_ADMIN: ${{ secrets.KC_ADMIN }}
+          KC_ADMIN_PASSWORD: ${{ secrets.KC_ADMIN_PASSWORD }}
+          KEYCLOAK_ADMIN_CLIENT_SECRET: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_SECRET }}
+          PLANELYX_PROVISIONING_SECRET: ${{ secrets.PLANELYX_PROVISIONING_SECRET }}
+          AUTH_LOG_LEVEL: ${{ vars.AUTH_LOG_LEVEL }}
+          AUTH_TAG: ${{ inputs.auth_tag }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          rendered=$(
+              printf '# Rendered by .github/workflows/deploy.yml (run %s). Hand edits are lost on the next deploy.\n' "$GITHUB_RUN_ID"
+              printf 'REGISTRY=%s-docker.pkg.dev/%s/%s\n' "$REGION" "$GCP_PROJECT_ID" "$REPOSITORY"
+              printf 'AUTH_TAG=%s\n' "$AUTH_TAG"
+              printf "KC_DB_PASSWORD='%s'\n" "$KC_DB_PASSWORD"
+              printf "KC_ADMIN='%s'\n" "$KC_ADMIN"
+              printf "KC_ADMIN_PASSWORD='%s'\n" "$KC_ADMIN_PASSWORD"
+              printf "KEYCLOAK_ADMIN_CLIENT_SECRET='%s'\n" "$KEYCLOAK_ADMIN_CLIENT_SECRET"
+              printf "PLANELYX_PROVISIONING_SECRET='%s'\n" "$PLANELYX_PROVISIONING_SECRET"
+              printf 'AUTH_LOG_LEVEL=%s\n' "${AUTH_LOG_LEVEL:-info}"
+          )
+
+          printf '%s\n' "$rendered" \
+              | ssh $SSH_OPTS "$REMOTE" "umask 077 && cat > '$VPS_PATH/.env.staged'"
+
+          echo "Staged .env on the VPS (contents deliberately not logged)."
+
+      - name: Pull the image against the staged files
+        run: |
+          set -euo pipefail
+          ssh $SSH_OPTS "$REMOTE" \
+              "cd '$VPS_PATH' && docker compose -f compose.prod.yaml.staged --env-file .env.staged pull keycloak"
+
+      - name: Deploy
+        run: |
+          set -euo pipefail
+
+          log="${RUNNER_TEMP:-/tmp}/deploy-remote.log"
+
+          ssh $SSH_OPTS "$REMOTE" bash -s -- "$VPS_PATH" "$WAIT_TIMEOUT" <<'REMOTE_SCRIPT' | tee "$log"
+          set -euo pipefail
+          cd "$1"
+          wait_timeout=$2
+          COMPOSE=compose.prod.yaml
+
+          cp .env .env.prev 2>/dev/null || true
+          mv .env.staged .env
+          mv compose.prod.yaml.staged "$COMPOSE"
+
+          docker compose -f "$COMPOSE" up -d --wait --wait-timeout "$wait_timeout" --remove-orphans || {
+              echo >&2
+              echo "--- last 50 log lines ---" >&2
+              docker compose -f "$COMPOSE" logs --tail 50 >&2 || true
+              exit 1
+          }
+
+          docker image prune -f || true
+
+          echo
+          docker compose -f "$COMPOSE" ps
+
+          echo DEPLOY_SCRIPT_COMPLETE
+          REMOTE_SCRIPT
+
+          grep -qx DEPLOY_SCRIPT_COMPLETE "$log" || {
+              echo "::error::The remote deploy script did not run to completion — its closing sentinel never arrived. Check whether a command in the script consumed stdin before re-running."
+              exit 1
+          }
+
+      - name: Smoke checks
+        run: |
+          set -euo pipefail
+          fail=0
+
+          # The issuer must follow the hostname the request arrived on: that is what lets one
+          # server serve a realm per product, each on its product's own domain.
+          while read -r host realm; do
+              [[ -n ${host:-} ]] || continue
+
+              want="$host/auth/realms/$realm"
+              got=$(curl -fsS --retry 5 --retry-delay 3 \
+                  "$want/.well-known/openid-configuration" | jq -r '.issuer') || got=""
+
+              if [[ $got == "$want" ]]; then
+                  echo "auth: issuer on $host is $got"
+              else
+                  echo "::error::auth: issuer on $host is '${got:-unreachable}', expected '$want'."
+                  fail=1
+              fi
+          done <<< "$ISSUER_CHECKS"
+
+          # A forged Host must not become the issuer. If this passes, the vhost is not pinning
+          # the header and every link Keycloak emits is attacker-controllable.
+          probe=$(head -n1 <<< "$ISSUER_CHECKS" | awk '{print $1"/auth/realms/"$2}')
+          forged=$(curl -fsS --retry 3 --retry-delay 2 -H 'Host: forged.example' \
+              "$probe/.well-known/openid-configuration" | jq -r '.issuer') || forged=""
+
+          if [[ $forged == *forged.example* ]]; then
+              echo "::error::auth: a forged Host header reached Keycloak — the issuer came back as '$forged'. Pin Host and X-Forwarded-Host in the /auth/ location (VPS_SETUP.md §4)."
+              fail=1
+          else
+              echo "auth: a forged Host header does not reach Keycloak"
+          fi
+
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$ADMIN_URL/auth/admin/") || code="000"
+          if [[ $code == 200 || $code == 302 ]]; then
+              echo "auth: the admin console answers on $ADMIN_URL"
+          else
+              echo "::error::auth: $ADMIN_URL/auth/admin/ returned $code."
+              fail=1
+          fi
+
+          (( fail == 0 )) || exit 1
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          if [[ -n ${REMOTE:-} ]]; then
+              ssh $SSH_OPTS "$REMOTE" "cd '$VPS_PATH' && docker compose -f compose.prod.yaml logs --tail 50" || true
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          AUTH_TAG: ${{ inputs.auth_tag }}
+        run: |
+          set -euo pipefail
+          {
+              echo "## Deploy — ${{ job.status }}"
+              echo
+              echo "| Service | Tag |"
+              echo "|---|---|"
+              echo "| \`keycloak\` | \`$AUTH_TAG\` |"
+              echo
+              echo "Compose file shipped from \`${GITHUB_SHA:0:7}\`."
+              echo
+              echo "Rollback: re-run with the previous tag, or read \`.env.prev\` on the VPS."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up
+        if: always()
+        run: |
+          if [[ -n ${REMOTE:-} ]]; then
+              ssh $SSH_OPTS "$REMOTE" "rm -f '$VPS_PATH/.env.staged' '$VPS_PATH/compose.prod.yaml.staged'" || true
+          fi
+          rm -f ~/.ssh/deploy_key ~/.ssh/deploy_known_hosts

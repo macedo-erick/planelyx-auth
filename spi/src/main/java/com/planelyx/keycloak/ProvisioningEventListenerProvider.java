@@ -1,5 +1,7 @@
 package com.planelyx.keycloak;
 
+import java.util.Map;
+import org.jboss.logging.Logger;
 import org.keycloak.events.Event;
 import org.keycloak.events.EventListenerProvider;
 import org.keycloak.events.EventType;
@@ -23,16 +25,22 @@ import org.keycloak.models.RealmModel;
  * {@code onEvent} while the registration is still open, so sending immediately would tell the API
  * about users whose creation then rolled back, and would put an HTTP round trip inside the
  * transaction that the browser is waiting on.
+ *
+ * One server serves a realm per product, so the notifier is chosen by the realm the event came
+ * from. A realm with no notifier configured is silently skipped — it is a realm whose product does
+ * not want the callback, not an error.
  */
 final class ProvisioningEventListenerProvider implements EventListenerProvider {
 
+    private static final Logger LOG = Logger.getLogger(ProvisioningEventListenerProvider.class);
+
     private final KeycloakSession session;
 
-    private final ProvisioningNotifier notifier;
+    private final Map<String, ProvisioningNotifier> notifiers;
 
-    ProvisioningEventListenerProvider(KeycloakSession session, ProvisioningNotifier notifier) {
+    ProvisioningEventListenerProvider(KeycloakSession session, Map<String, ProvisioningNotifier> notifiers) {
         this.session = session;
-        this.notifier = notifier;
+        this.notifiers = notifiers;
     }
 
     @Override
@@ -61,6 +69,13 @@ final class ProvisioningEventListenerProvider implements EventListenerProvider {
         // Resolved here rather than inside the callback: by the time the transaction has completed
         // the session is on its way out and is no longer safe to read from.
         String realmName = realmName(realmId);
+        ProvisioningNotifier notifier = notifiers.get(ProvisioningEventListenerProviderFactory.realmKey(realmName));
+
+        if (notifier == null) {
+            LOG.debugf("No provisioning callback configured for realm %s — user %s not announced", realmName, userId);
+
+            return;
+        }
 
         session.getTransactionManager().enlistAfterCompletion(new AbstractKeycloakTransaction() {
             @Override
