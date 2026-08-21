@@ -17,6 +17,7 @@ VPS_SETUP.md     building and operating the host
 | Realm | Served at | Product |
 |---|---|---|
 | `planelyx` | `https://planelyx.com/auth` | planelyx-ui / planelyx-api / planelyx-ocr |
+| `listryx` | `https://listryx.com/auth` | listryx-ui / listryx-api |
 
 `auth.macedosoftware.com` serves the admin console and nothing else.
 
@@ -79,9 +80,12 @@ Read only during a realm's first import:
 | `PLANELYX_UI_ORIGIN` | `http://localhost:4200` | `https://planelyx.com` | `webOrigins` — a bare origin, no path |
 | `PLANELYX_UI_BASE_URL` | `http://localhost:4200` | `https://planelyx.com/ui` | `rootUrl`, `redirectUris`, post-logout URIs — includes the base path |
 | `PLANELYX_KEYCLOAK_ADMIN_CLIENT_SECRET` | `local-dev-secret` | read out of Keycloak | secret of the `planelyx-api-admin` client |
+| `LISTRYX_UI_ORIGIN` | `http://localhost:4201` | `https://listryx.com` | `webOrigins` for `listryx-ui` |
+| `LISTRYX_UI_BASE_URL` | `http://localhost:4201` | `https://listryx.com/ui` | `rootUrl`, `redirectUris`, post-logout URIs for `listryx-ui` |
+| `LISTRYX_KEYCLOAK_ADMIN_CLIENT_SECRET` | `local-dev-secret` | read out of Keycloak | secret of the `listryx-api-admin` client |
 
-The first two are split because `webOrigins` is a CORS origin and rejects a path, while redirect
-URIs must carry the `/ui` base href the SPA is served under.
+Each product's `_ORIGIN`/`_BASE_URL` pair is split because `webOrigins` is a CORS origin and
+rejects a path, while redirect URIs must carry the `/ui` base href the SPA is served under.
 
 ## Clients in the `planelyx` realm
 
@@ -94,6 +98,23 @@ URIs must carry the `/ui` base href the SPA is served under.
 through the seeded `service-account-planelyx-api-admin` user in the export. The API reads its
 secret from `KEYCLOAK_ADMIN_CLIENT_SECRET` and reaches the Admin API at
 `https://auth.macedosoftware.com/auth` — the product domains return 404 for `/auth/admin/`.
+
+## Clients in the `listryx` realm
+
+| Client | Type | Used by |
+|---|---|---|
+| `listryx-ui` | public, standard flow + PKCE | the Angular app, to sign users in |
+| `listryx-api-admin` | confidential, service account only | the API, to read and update the signed-in user's own profile |
+
+The same pair as planelyx, and for the same reason — `listryx-api`'s `/api/me` edits the user's
+own Keycloak profile — so `LISTRYX_KEYCLOAK_ADMIN_CLIENT_SECRET` must be set before the realm
+first boots. Its fallback is the literal `local-dev-secret`, and a realm imports exactly once, so
+an unset variable in production means a service account holding `manage-users` with a secret
+published in this repository.
+
+What listryx does not have is the provisioning listener: it seeds nothing on registration, so its
+`eventsListeners` stays at `jboss-logging` and there is no callback URL or shared secret to keep
+in step across repos.
 
 ## The provisioning event listener
 
@@ -127,13 +148,22 @@ is compiled against one and loaded by the other.
 
 ## Local development
 
-`planelyx-api/compose.yaml` builds **this image** (`build: { context: ../auth }`)
-and bind-mounts `realms/planelyx.json` and `themes/planelyx` over the baked copies, so the realm,
-the theme and the provider exist once, here, and edits are live without a rebuild.
+Each product's local stack runs its own Keycloak and mounts what it needs from **this** repo, so
+every realm and theme exists once, here, and edits are live without a rebuild:
 
-Locally Keycloak serves at `http://localhost:8081/auth` with a fixed hostname — the dynamic
-resolution above is a production concern. There is no seeded user; registration is enabled, so
-create an account through the app.
+| Stack | Serves at | Mounts |
+|---|---|---|
+| `planelyx-api/compose.yaml` | `http://localhost:8081/auth` | builds this image (`context: ../auth`), then binds `realms/planelyx.json` and `themes/planelyx` over the baked copies |
+| `listryx-api/compose.yaml` | `http://localhost:8089/auth` | the stock `keycloak:26.0` with `--http-relative-path=/auth`, binding `realms/listryx.json` and `themes/listryx` |
+
+Listryx runs the stock image rather than building this one because it uses neither the
+provisioning SPI nor the Postgres provider; the only build-time option it needs is the `/auth`
+path, and `start-dev` takes that as a flag. Its compose reaches in with `../../planelyx/auth` —
+this repository is shared, and only happens to be checked out beside planelyx.
+
+Locally Keycloak serves on a fixed hostname — the dynamic resolution above is a production
+concern. There is no seeded user on either realm; registration is enabled, so create an account
+through the app.
 
 ## Deploying
 
@@ -152,6 +182,9 @@ run replaced is in `.env.prev` on the box.
 The other input, `allow_secret_change`, is for a credential rotation the drift check would
 otherwise reject.
 
-Two of those secrets — `KEYCLOAK_ADMIN_CLIENT_SECRET` and `PLANELYX_PROVISIONING_SECRET` — also
-live in `planelyx-infra`, and nothing checks the two copies agree. Rotating either means updating
-both repositories and redeploying both stacks. `VPS_SETUP.md` §6 has the full table.
+Three of those secrets also live in a product's infra repo, and nothing checks the two copies
+agree — `KEYCLOAK_ADMIN_CLIENT_SECRET` and `PLANELYX_PROVISIONING_SECRET` in `planelyx-infra`,
+and `LISTRYX_KEYCLOAK_ADMIN_CLIENT_SECRET` in `listryx-infra`, where it is named
+`KEYCLOAK_ADMIN_CLIENT_SECRET` because that API only knows its own realm. Rotating any of them
+means updating both repositories and redeploying both stacks. `VPS_SETUP.md` §6 has the full
+table.

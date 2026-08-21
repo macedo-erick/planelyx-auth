@@ -15,6 +15,7 @@ services:
     extra_hosts:
       - 'host.docker.internal:host-gateway'
       - 'planelyx.com:host-gateway'
+      - 'listryx.com:host-gateway'
     environment:
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://host.docker.internal:5432/keycloak
@@ -31,6 +32,9 @@ services:
       PLANELYX_KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:?KEYCLOAK_ADMIN_CLIENT_SECRET is not set}
       PROVISIONING_PLANELYX_URL: https://planelyx.com/internal/keycloak/user-registered
       PROVISIONING_PLANELYX_SECRET: ${PLANELYX_PROVISIONING_SECRET:?PLANELYX_PROVISIONING_SECRET is not set}
+      LISTRYX_UI_ORIGIN: https://listryx.com
+      LISTRYX_UI_BASE_URL: https://listryx.com/ui
+      LISTRYX_KEYCLOAK_ADMIN_CLIENT_SECRET: ${LISTRYX_KEYCLOAK_ADMIN_CLIENT_SECRET:?LISTRYX_KEYCLOAK_ADMIN_CLIENT_SECRET is not set}
     healthcheck:
       test:
         [

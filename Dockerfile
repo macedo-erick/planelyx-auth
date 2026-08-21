@@ -28,7 +28,8 @@ ENV KC_DB=postgres \
     KC_HTTP_RELATIVE_PATH=/auth \
     KC_HTTP_MANAGEMENT_RELATIVE_PATH=/
 
-COPY themes/planelyx /opt/keycloak/themes/planelyx
+# Every product's login theme, since the image serves every realm.
+COPY themes/ /opt/keycloak/themes/
 # Must land before `kc.sh build`: the build is what discovers providers and bakes them into the
 # optimized image. A jar added afterwards is simply not there as far as `start --optimized` is
 # concerned, and the realm's Event listeners entry then points at nothing.

@@ -1,0 +1,66 @@
+{
+  "realm": "listryx",
+  "enabled": true,
+  "displayName": "Listryx",
+  "displayNameHtml": "Listryx",
+  "loginTheme": "listryx",
+  "sslRequired": "external",
+  "accessTokenLifespan": 3600,
+  "registrationAllowed": true,
+  "registrationEmailAsUsername": false,
+  "resetPasswordAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": false,
+  "passwordPolicy": "length(12) and digits(1) and lowerCase(1) and upperCase(1) and specialChars(1) and notUsername and notEmail",
+  "eventsListeners": [
+    "jboss-logging"
+  ],
+  "clients": [
+    {
+      "clientId": "listryx-ui",
+      "enabled": true,
+      "description": "The Angular app. Public client with PKCE; the confidential counterpart `listryx-api-admin` is what listryx-api uses to reach the Admin API.",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "rootUrl": "${LISTRYX_UI_BASE_URL:http://localhost:4201}",
+      "redirectUris": [
+        "${LISTRYX_UI_BASE_URL:http://localhost:4201}/*"
+      ],
+      "webOrigins": [
+        "${LISTRYX_UI_ORIGIN:http://localhost:4201}"
+      ],
+      "attributes": {
+        "post.logout.redirect.uris": "${LISTRYX_UI_BASE_URL:http://localhost:4201}/*",
+        "pkce.code.challenge.method": "S256"
+      }
+    },
+    {
+      "clientId": "listryx-api-admin",
+      "enabled": true,
+      "description": "Service account the API uses to read and update the signed-in user's own profile.",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "${LISTRYX_KEYCLOAK_ADMIN_CLIENT_SECRET:local-dev-secret}"
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-listryx-api-admin",
+      "enabled": true,
+      "serviceAccountClientId": "listryx-api-admin",
+      "clientRoles": {
+        "realm-management": [
+          "view-users",
+          "manage-users"
+        ]
+      }
+    }
+  ]
+}
