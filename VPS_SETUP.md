@@ -56,7 +56,21 @@ The role and database already exist and **must not be touched** — they hold ev
 Only the network they are reached from changes, because a second Compose project means a second
 bridge network with a subnet of its own.
 
-In `/etc/postgresql/16/main/pg_hba.conf`, alongside the existing `172.20.0.0/16` rules:
+Two layers restrict port 5432, and **both** name a subnet. `planelyx-infra/VPS_SETUP.md` §4
+and §7 opened them for `172.20.0.0/16`; neither knows about this stack's network.
+
+First `ufw`, which is the one that bites, because it fails silently:
+
+```bash
+sudo ufw allow from 172.21.0.0/16 to any port 5432 proto tcp \
+    comment 'auth containers -> host postgres'
+sudo ufw reload
+sudo ufw status verbose | grep 5432
+```
+
+Then `/etc/postgresql/16/main/pg_hba.conf`, alongside the existing `172.20.0.0/16` rules —
+**add** a line, do not edit the existing `keycloak` one, or the §8 rollback to the old container
+stops working:
 
 ```
 host    keycloak    keycloak    172.21.0.0/16    scram-sha-256
@@ -66,10 +80,18 @@ host    keycloak    keycloak    172.21.0.0/16    scram-sha-256
 sudo systemctl reload postgresql
 ```
 
-The `172.21.0.0/16` here and the `ipam` subnet in `compose.prod.yaml` must agree. Change one
-without the other and Keycloak's first database connection hangs until it times out, which
-surfaces as a container that never becomes healthy and a log line about the connection pool,
-never about `pg_hba.conf`.
+The `172.21.0.0/16` in both places and the `ipam` subnet in `compose.prod.yaml` must agree.
+
+The two failures look nothing alike, and telling them apart is most of the diagnosis:
+
+| Missing | What Keycloak logs | Why |
+|---|---|---|
+| the `ufw` rule | `The connection attempt failed`, then `Acquisition timeout while waiting for new connection` — nothing naming Postgres | `default deny incoming` **drops** the packets, so the TCP handshake gets no answer at all |
+| the `pg_hba` line | an immediate `FATAL: no pg_hba.conf entry for host "172.21.0.2"` | Postgres accepted the connection and then refused it, by name |
+
+A timeout is the firewall. An error that names the address is `pg_hba.conf`. Fix `ufw` first:
+until the packets arrive, `pg_hba.conf` is never consulted and a correct rule there proves
+nothing.
 
 Verify before starting the stack:
 
