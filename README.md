@@ -137,9 +137,20 @@ create an account through the app.
 
 ## Deploying
 
-Actions → deploy → Run workflow, with the commit SHA the release run printed as `AUTH_TAG=<sha>`.
-The workflow ships `compose.prod.yaml` from the commit being deployed, renders `.env` on the VPS
-from this repo's secrets, pulls, brings the stack up and verifies the issuer on every hostname.
+A push to `master` deploys itself. One workflow does the whole thing: a `build` job pushes
+`keycloak:<sha>` to Artifact Registry, and a `deploy` job that `needs` it ships
+`compose.prod.yaml`, renders `.env` on the VPS from this repo's secrets, pulls, brings the stack
+up and verifies the issuer on every hostname. There is no `AUTH_TAG` to copy anywhere — the
+commit being deployed *is* the tag.
+
+Rollback is the same workflow with a tag: Actions → deploy → Run workflow, `auth_tag` =
+the commit SHA you want back. A non-empty `auth_tag` skips the build entirely and deploys the
+image already in Artifact Registry, checking out that same commit so its `compose.prod.yaml`
+goes with it. Leave `auth_tag` blank and it builds the branch, exactly as a push does. The tag a
+run replaced is in `.env.prev` on the box.
+
+The other input, `allow_secret_change`, is for a credential rotation the drift check would
+otherwise reject.
 
 Two of those secrets — `KEYCLOAK_ADMIN_CLIENT_SECRET` and `PLANELYX_PROVISIONING_SECRET` — also
 live in `planelyx-infra`, and nothing checks the two copies agree. Rotating either means updating

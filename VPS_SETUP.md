@@ -193,9 +193,9 @@ gcloud artifacts repositories add-iam-policy-binding auth \
   --role=roles/artifactregistry.reader
 ```
 
-Skip the writer grant and the first release fails at push with
+Skip the writer grant and the first build fails at push with
 `denied: Permission "artifactregistry.repositories.uploadArtifacts" denied`. Skip the reader
-grant and the release succeeds while the deploy fails at `docker compose pull`.
+grant and the build succeeds while the deploy fails at `docker compose pull`.
 
 On the box, if the VPS pulls with a different service account than the planelyx images use:
 
@@ -216,7 +216,7 @@ of it to **this** repo before the first deploy run: Settings → Secrets and var
 | Secret | Where it comes from |
 |---|---|
 | `GCP_PROJECT_ID` | the GCP project number/id; same value as `planelyx-infra` |
-| `GCP_SA_KEY` | the release service account's JSON key, granted writer on the `auth` repository (§5) |
+| `GCP_SA_KEY` | the build service account's JSON key, granted writer on the `auth` repository (§5) |
 | `VPS_HOST` | the VPS address; same as `planelyx-infra` |
 | `VPS_USER` | the deploy user; same as `planelyx-infra` |
 | `VPS_SSH_KEY` | the deploy private key; same as `planelyx-infra` |
@@ -385,9 +385,23 @@ one-way, and an older image will not start against a migrated database.
 
 ### Deploying
 
-Actions → deploy → Run workflow, with the commit SHA the release run printed as
-`AUTH_TAG=<sha>`. Rollback is the same workflow with the previous SHA; the previous tag is in
-the prior run's summary and in `.env.prev` on the box.
+Merging to `master` is the whole deploy: `deploy.yml` builds the image in its `build` job and
+deploys it from `deploy`, unattended, with the commit SHA as the image tag. Nothing is dispatched
+by hand and no tag is passed between workflows.
+
+One thing switches that off without any error appearing: if the `production` environment has
+required reviewers, the run starts but parks on approval, which reads as "it deployed by itself,
+eventually". Settings → Environments → production.
+
+Rollback is Actions → deploy → Run workflow with `auth_tag` set to the commit SHA you want
+back. A non-empty `auth_tag` skips the `build` job and deploys the image already in the registry,
+so a rollback neither rebuilds nor depends on the Dockerfile still producing the same output. The
+tag the last run replaced is in `.env.prev` on the box, and the run summary records whether the
+image was built or redeployed.
+
+Because the deploy job checks out `auth_tag` too, rolling back the image rolls back
+`compose.prod.yaml` with it. That is what you want, and it means an image is only ever deployed
+against the Compose file from its own commit.
 
 Break-glass, on the VPS:
 
