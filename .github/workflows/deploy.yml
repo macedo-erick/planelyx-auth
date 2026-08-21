@@ -1,12 +1,14 @@
 name: deploy
 
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
     inputs:
       auth_tag:
-        description: 'Keycloak image tag (commit SHA) — the release run prints it as AUTH_TAG=...'
+        description: 'Commit SHA of an image already in Artifact Registry — deploy it as-is, skipping the build. Blank builds this branch.'
         type: string
-        required: true
+        default: ''
       allow_secret_change:
         description: 'Allow credentials to differ from the VPS (credential rotation)'
         type: boolean
@@ -22,27 +24,62 @@ concurrency:
 env:
   REGION: southamerica-east1
   REPOSITORY: auth
+  IMAGE: keycloak
   VPS_PATH: auth
   ADMIN_URL: https://auth.macedosoftware.com
-  # Every origin Keycloak is served on, and the realm each one must issue for. Add a line here
-  # when a product joins; the smoke check asserts each pair resolves to its own issuer.
   ISSUER_CHECKS: |
     https://planelyx.com planelyx
     https://auth.macedosoftware.com planelyx
+  PAYLOAD: compose.prod.yaml
   WAIT_TIMEOUT: '300'
 
 jobs:
-  deploy:
+  build:
+    if: ${{ !inputs.auth_tag }}
     runs-on: ubuntu-latest
-    environment: production
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v5
 
+      - run: for f in realms/*.json; do jq empty "$f"; done
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    if: ${{ always() && needs.build.result != 'failure' && needs.build.result != 'cancelled' }}
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    env:
+      AUTH_TAG: ${{ inputs.auth_tag || github.sha }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.auth_tag || github.sha }}
+
       - name: Validate inputs
         env:
-          AUTH_TAG: ${{ inputs.auth_tag }}
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
           KC_DB_PASSWORD: ${{ secrets.KC_DB_PASSWORD }}
           KC_ADMIN: ${{ secrets.KC_ADMIN }}
@@ -62,7 +99,7 @@ jobs:
           for name in GCP_PROJECT_ID KC_DB_PASSWORD KC_ADMIN KC_ADMIN_PASSWORD KEYCLOAK_ADMIN_CLIENT_SECRET PLANELYX_PROVISIONING_SECRET; do
               value=${!name}
               if [[ -z $value ]]; then
-                  echo "::error::Repo secret $name is empty or not set."
+                  echo "::error::Repo secret $name is empty or not set. See VPS_SETUP.md §6."
                   fail=1
               elif [[ $value == *"'"* ]]; then
                   echo "::error::Repo secret $name contains a single quote, which cannot be represented in a Compose .env value. Regenerate it without one."
@@ -96,12 +133,12 @@ jobs:
               echo "REMOTE=$VPS_USER@$VPS_HOST"
           } >> "$GITHUB_ENV"
 
-      - name: Ship compose.prod.yaml
+      - name: Ship the config tree
         run: |
           set -euo pipefail
-          ssh $SSH_OPTS "$REMOTE" "mkdir -p '$VPS_PATH'"
-          ssh $SSH_OPTS "$REMOTE" "cat > '$VPS_PATH/compose.prod.yaml.staged'" < compose.prod.yaml
-          echo "Shipped compose.prod.yaml from ${GITHUB_SHA:0:7}"
+          ssh $SSH_OPTS "$REMOTE" "rm -rf '$VPS_PATH/.staged' && mkdir -p '$VPS_PATH/.staged'"
+          tar -cz $PAYLOAD | ssh $SSH_OPTS "$REMOTE" "tar -xz -C '$VPS_PATH/.staged'"
+          echo "Shipped the config tree from ${AUTH_TAG:0:7}"
 
       - name: Check for credential drift
         if: ${{ !inputs.allow_secret_change }}
@@ -138,7 +175,7 @@ jobs:
           for name in KC_DB_PASSWORD KC_ADMIN KC_ADMIN_PASSWORD KEYCLOAK_ADMIN_CLIENT_SECRET PLANELYX_PROVISIONING_SECRET; do
               on_vps=$(read_env_key "$name")
               if [[ $on_vps != "${!name}" ]]; then
-                  echo "::error::Secret drift: $name differs between the repo secret and the VPS .env. If this is a deliberate rotation, re-run with 'Allow credentials to differ' ticked — and make sure the Postgres role, or planelyx-infra's copy of the shared secret, was changed to match."
+                  echo "::error::Secret drift: $name differs between the repo secret and the VPS .env. If this is a deliberate rotation, re-run from Actions with 'Allow credentials to differ' ticked — and make sure the Postgres role, or planelyx-infra's copy of the shared secret, was changed to match."
                   fail=1
               fi
           done
@@ -155,7 +192,6 @@ jobs:
           KEYCLOAK_ADMIN_CLIENT_SECRET: ${{ secrets.KEYCLOAK_ADMIN_CLIENT_SECRET }}
           PLANELYX_PROVISIONING_SECRET: ${{ secrets.PLANELYX_PROVISIONING_SECRET }}
           AUTH_LOG_LEVEL: ${{ vars.AUTH_LOG_LEVEL }}
-          AUTH_TAG: ${{ inputs.auth_tag }}
         run: |
           set -euo pipefail
           umask 077
@@ -175,47 +211,42 @@ jobs:
           printf '%s\n' "$rendered" \
               | ssh $SSH_OPTS "$REMOTE" "umask 077 && cat > '$VPS_PATH/.env.staged'"
 
-          echo "Staged .env on the VPS (contents deliberately not logged)."
-
-      - name: Pull the image against the staged files
-        run: |
-          set -euo pipefail
-          ssh $SSH_OPTS "$REMOTE" \
-              "cd '$VPS_PATH' && docker compose -f compose.prod.yaml.staged --env-file .env.staged pull keycloak"
+          echo "Staged .env (contents deliberately not logged)."
 
       - name: Deploy
         run: |
           set -euo pipefail
-
           log="${RUNNER_TEMP:-/tmp}/deploy-remote.log"
 
-          ssh $SSH_OPTS "$REMOTE" bash -s -- "$VPS_PATH" "$WAIT_TIMEOUT" <<'REMOTE_SCRIPT' | tee "$log"
+          ssh $SSH_OPTS "$REMOTE" bash -s -- "$VPS_PATH" "$WAIT_TIMEOUT" $PAYLOAD <<'REMOTE_SCRIPT' | tee "$log"
           set -euo pipefail
           cd "$1"
           wait_timeout=$2
-          COMPOSE=compose.prod.yaml
+          shift 2
+          payload=("$@")
 
           cp .env .env.prev 2>/dev/null || true
           mv .env.staged .env
-          mv compose.prod.yaml.staged "$COMPOSE"
 
-          docker compose -f "$COMPOSE" up -d --wait --wait-timeout "$wait_timeout" --remove-orphans || {
-              echo >&2
-              echo "--- last 50 log lines ---" >&2
-              docker compose -f "$COMPOSE" logs --tail 50 >&2 || true
-              exit 1
-          }
+          # Replace each shipped path wholesale so deletions propagate, while leaving
+          # .env and the Docker volumes alone.
+          for item in "${payload[@]}"; do
+              rm -rf "./$item"
+              cp -a ".staged/$item" "./$item"
+          done
+          rm -rf .staged
+
+          docker compose -f compose.prod.yaml pull -q
+          docker compose -f compose.prod.yaml up -d --force-recreate --wait --wait-timeout "$wait_timeout" --remove-orphans
 
           docker image prune -f || true
-
           echo
-          docker compose -f "$COMPOSE" ps
-
+          docker compose -f compose.prod.yaml ps
           echo DEPLOY_SCRIPT_COMPLETE
           REMOTE_SCRIPT
 
           grep -qx DEPLOY_SCRIPT_COMPLETE "$log" || {
-              echo "::error::The remote deploy script did not run to completion — its closing sentinel never arrived. Check whether a command in the script consumed stdin before re-running."
+              echo "::error::The remote deploy script did not run to completion — its closing sentinel never arrived, so the stack may be half-updated."
               exit 1
           }
 
@@ -224,13 +255,11 @@ jobs:
           set -euo pipefail
           fail=0
 
-          # The issuer must follow the hostname the request arrived on: that is what lets one
-          # server serve a realm per product, each on its product's own domain.
           while read -r host realm; do
               [[ -n ${host:-} ]] || continue
 
               want="$host/auth/realms/$realm"
-              got=$(curl -fsS --retry 5 --retry-delay 3 \
+              got=$(curl -fsS --retry 10 --retry-delay 3 \
                   "$want/.well-known/openid-configuration" | jq -r '.issuer') || got=""
 
               if [[ $got == "$want" ]]; then
@@ -241,8 +270,6 @@ jobs:
               fi
           done <<< "$ISSUER_CHECKS"
 
-          # A forged Host must not become the issuer. If this passes, the vhost is not pinning
-          # the header and every link Keycloak emits is attacker-controllable.
           probe=$(head -n1 <<< "$ISSUER_CHECKS" | awk '{print $1"/auth/realms/"$2}')
           forged=$(curl -fsS --retry 3 --retry-delay 2 -H 'Host: forged.example' \
               "$probe/.well-known/openid-configuration" | jq -r '.issuer') || forged=""
@@ -273,26 +300,24 @@ jobs:
 
       - name: Summary
         if: always()
-        env:
-          AUTH_TAG: ${{ inputs.auth_tag }}
         run: |
           set -euo pipefail
           {
               echo "## Deploy — ${{ job.status }}"
               echo
-              echo "| Service | Tag |"
-              echo "|---|---|"
-              echo "| \`keycloak\` | \`$AUTH_TAG\` |"
+              echo "| Service | Tag | Source |"
+              echo "|---|---|---|"
+              echo "| \`keycloak\` | \`${AUTH_TAG:0:7}\` | ${{ needs.build.result == 'skipped' && 'redeployed, not rebuilt' || 'built by this run' }} |"
               echo
-              echo "Compose file shipped from \`${GITHUB_SHA:0:7}\`."
-              echo
-              echo "Rollback: re-run with the previous tag, or read \`.env.prev\` on the VPS."
+              echo "Rollback: Actions → deploy → Run workflow with the previous commit SHA in"
+              echo "\`auth_tag\`. That skips the build and redeploys the image already in the registry."
+              echo "The tag this run replaced is in \`.env.prev\` on the VPS."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clean up
         if: always()
         run: |
           if [[ -n ${REMOTE:-} ]]; then
-              ssh $SSH_OPTS "$REMOTE" "rm -f '$VPS_PATH/.env.staged' '$VPS_PATH/compose.prod.yaml.staged'" || true
+              ssh $SSH_OPTS "$REMOTE" "rm -rf '$VPS_PATH/.staged' '$VPS_PATH/.env.staged'" || true
           fi
           rm -f ~/.ssh/deploy_key ~/.ssh/deploy_known_hosts
