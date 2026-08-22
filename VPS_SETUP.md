@@ -135,6 +135,54 @@ sudo ln -s /etc/nginx/sites-available/catch-all /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+### Hand the three files to the deploy user
+
+That is the one-time bootstrap. From there the **deploy workflow owns these three files** and
+rewrites them on every run, so the deploy user has to be able to write them without `sudo`:
+
+```bash
+sudo chown "$VPS_USER":"$VPS_USER" /etc/nginx/sites-available/auth \
+                                   /etc/nginx/sites-available/catch-all \
+                                   /etc/nginx/snippets/keycloak-proxy.conf
+sudo chmod 644 /etc/nginx/sites-available/auth \
+               /etc/nginx/sites-available/catch-all \
+               /etc/nginx/snippets/keycloak-proxy.conf
+```
+
+`$VPS_USER` is the SSH user GitHub Actions deploys as. The directories stay root-owned and the
+symlinks in `sites-enabled/` are never touched — only these three files change hands, so the
+pipeline can replace them and nothing else in `/etc/nginx`.
+
+The workflow copies an explicit list of three files rather than syncing the directory, so
+`planelyx-infra`'s `sites-available/planelyx` and `snippets/planelyx-proxy.conf` are left alone.
+A directory sync in either repo would delete the other's files, and the next `nginx -t` would
+fail on the dangling include.
+
+### Sudoers rule
+
+The pipeline needs exactly two privileged commands:
+
+```bash
+sudo visudo -f /etc/sudoers.d/auth-deploy
+```
+
+```
+<VPS_USER> ALL=(root) NOPASSWD: /usr/sbin/nginx -t, /bin/systemctl reload nginx
+```
+
+Deliberately not blanket `NOPASSWD`: a leaked deploy key then buys a config test and a reload,
+not root. Check the binary paths with `command -v nginx` and `command -v systemctl` — a path that
+does not match is a rule that silently never applies. Verify **as the deploy user**,
+non-interactively, or the failure surfaces mid-deploy instead:
+
+```bash
+sudo -n nginx -t && echo "sudoers rule works"
+```
+
+`planelyx-infra` installs `/etc/sudoers.d/planelyx-deploy` with the same two commands. Both files
+can coexist; if the deploy user is the same for both, one rule is enough and the second is a
+harmless duplicate.
+
 ### The Host header is a security control here
 
 Keycloak derives the issuer, and the base URL of every password-reset and email-verification
@@ -422,8 +470,16 @@ tag the last run replaced is in `.env.prev` on the box, and the run summary reco
 image was built or redeployed.
 
 Because the deploy job checks out `auth_tag` too, rolling back the image rolls back
-`compose.prod.yaml` with it. That is what you want, and it means an image is only ever deployed
-against the Compose file from its own commit.
+`compose.prod.yaml` **and the three nginx files** with it. That is what you want, and it means an
+image is only ever deployed against the Compose file and the vhost from its own commit.
+
+The nginx step runs after the containers are up and before the smoke checks. It compares each
+shipped file against the live one and does nothing at all when they match, so an ordinary deploy
+does not reload nginx. When something did change it backs the live copies up into `~/auth/nginx-prev/`,
+writes the new ones, and reloads only if `sudo nginx -t` passes — a failing test restores the
+backups and fails the run without ever reloading. That matters because this nginx process also
+serves `planelyx.com` and `monitoring.macedosoftware.com`; the smoke checks end by re-fetching
+`monitoring.macedosoftware.com` for exactly that reason.
 
 Break-glass, on the VPS:
 

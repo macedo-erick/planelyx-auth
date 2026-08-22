@@ -10,7 +10,8 @@ themes/          login themes, per product
 spi/             the `planelyx-provisioning` event listener
 Dockerfile       builds the optimized Keycloak image
 compose.prod.yaml   the production stack — shipped to the VPS per deploy
-nginx/           the admin vhost, the shared proxy snippets, the catch-all server
+nginx/           the admin vhost, the shared proxy snippets, the catch-all server —
+                 installed into the host nginx tree per deploy
 VPS_SETUP.md     building and operating the host
 ```
 
