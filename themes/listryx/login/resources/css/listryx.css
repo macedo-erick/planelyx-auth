@@ -1,0 +1,516 @@
+/*
+ * Listryx login theme.
+ *
+ * Mirrors the Angular app's PrimeNG "Aura" preset so the hand-off between the SPA
+ * and Keycloak's pages does not look like two different products: emerald primary
+ * (Aura's default), neutral zinc surfaces, 6px control radii, system font stack.
+ *
+ * Styling is done mostly by overriding PatternFly's own custom properties rather
+ * than out-specifying its selectors, so PatternFly keeps computing hover, focus
+ * and disabled states from our values instead of us having to restate each one.
+ * The one deliberate exception is `.pf-v5-c-form-control::before/::after` (see
+ * the comment near that rule) — those pseudo-elements have hardcoded,
+ * non-overridable border colors, so they're disabled outright rather than
+ * fought with custom properties. Every --pf-v5-* property set below was checked
+ * against the patternfly.min.css shipped in keycloak-themes-26.0.8.jar — a name
+ * that does not exist there is silently ignored by the browser, so the list is
+ * deliberately conservative.
+ *
+ * Dark mode is `html.ft-dark`, toggled by the button rendered in template.ftl —
+ * see the comment above that class further down for how the initial state is
+ * chosen without a flash of the wrong theme.
+ */
+
+:root {
+  /* Aura primary = emerald. Values copied from @primeuix/themes. */
+  --ft-primary-50: #ecfdf5;
+  --ft-primary-100: #d1fae5;
+  --ft-primary-400: #34d399;
+  --ft-primary-500: #10b981;
+  --ft-primary-600: #059669;
+  --ft-primary-700: #047857;
+
+  --ft-danger: #ef4444;
+
+  /* Aura neutral = zinc scale. */
+  --ft-surface-ground: #fafafa;
+  --ft-surface-0: #ffffff;
+  --ft-surface-50: #f9fafb;
+  --ft-surface-100: #f4f4f5;
+  --ft-surface-200: #e4e4e7;
+  --ft-surface-900: #18181b;
+  --ft-text: #18181b;
+  --ft-text-muted: #52525b;
+  --ft-border: #e4e4e7;
+  --ft-focus-ring: rgb(16 185 129 / 20%);
+
+  --ft-radius: 6px;
+  --ft-font:
+    system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/*
+ * Dark mode is a `.ft-dark` class on <html>, toggled by the button in
+ * template.ftl. An inline script in <head> sets it once on load — from
+ * localStorage if the visitor already chose, otherwise from the OS
+ * preference — so there's no flash of the wrong theme and no dependency
+ * on JS running before first paint order matters.
+ */
+:root.ft-dark {
+  --ft-surface-ground: #09090b;
+  --ft-surface-0: #18181b;
+  --ft-surface-50: #1f1f23;
+  --ft-surface-100: #27272a;
+  --ft-surface-200: #3f3f46;
+  --ft-surface-900: #fafafa;
+  --ft-text: #fafafa;
+  --ft-text-muted: #a1a1aa;
+  --ft-border: #3f3f46;
+  --ft-focus-ring: rgb(16 185 129 / 28%);
+}
+
+/* ------------------------------------------------------------------ *
+ * PatternFly token mapping
+ * ------------------------------------------------------------------ */
+
+:root {
+  --pf-v5-global--primary-color--100: var(--ft-primary-500);
+  --pf-v5-global--link--Color: var(--ft-primary-600);
+  --pf-v5-global--danger-color--100: var(--ft-danger);
+  --pf-v5-global--BackgroundColor--100: var(--ft-surface-0);
+  --pf-v5-global--Color--100: var(--ft-text);
+  --pf-v5-global--Color--200: var(--ft-text-muted);
+  --pf-v5-global--BorderColor--100: var(--ft-border);
+  --pf-v5-global--BorderRadius--sm: var(--ft-radius);
+  --pf-v5-global--FontFamily--text: var(--ft-font);
+  --pf-v5-global--FontFamily--heading: var(--ft-font);
+
+  --pf-v5-c-button--BorderRadius: var(--ft-radius);
+  --pf-v5-c-button--m-primary--BackgroundColor: var(--ft-primary-500);
+  --pf-v5-c-button--m-primary--hover--BackgroundColor: var(--ft-primary-600);
+  --pf-v5-c-button--m-primary--focus--BackgroundColor: var(--ft-primary-600);
+  --pf-v5-c-button--m-primary--active--BackgroundColor: var(--ft-primary-700);
+  --pf-v5-c-button--m-primary--Color: #ffffff;
+  --pf-v5-c-button--m-secondary--Color: var(--ft-primary-600);
+  --pf-v5-c-button--m-secondary--BorderColor: var(--ft-surface-200);
+  --pf-v5-c-button--m-secondary--hover--BackgroundColor: var(--ft-surface-50);
+
+  --pf-v5-c-form-control--BackgroundColor: var(--ft-surface-0);
+  --pf-v5-c-form-control--Color: var(--ft-text);
+  --pf-v5-c-form__label--FontSize: 0.875rem;
+
+  --pf-v5-c-check__label--Color: var(--ft-text);
+  --pf-v5-c-alert--m-danger--BorderTopColor: var(--ft-danger);
+
+  --pf-v5-c-login__main--BackgroundColor: var(--ft-surface-0);
+  --pf-v5-c-login__main-header--PaddingTop: 2rem;
+  --pf-v5-c-title--m-3xl--FontSize: 1.5rem;
+}
+
+/* ------------------------------------------------------------------ *
+ * Page shell
+ * ------------------------------------------------------------------ */
+
+/* Removes the browser's default 8px body margin, which — combined with the
+   shell's `min-height: 100vh` below — made the document taller than the
+   viewport and produced a permanent, unnecessary vertical scrollbar. */
+html,
+body#keycloak-bg {
+  margin: 0;
+}
+
+body#keycloak-bg {
+  color: var(--ft-text);
+  font-family: var(--ft-font);
+}
+
+/* ------------------------------------------------------------------ *
+ * Split-screen shell (branding panel + form panel)
+ * ------------------------------------------------------------------ */
+
+.ft-auth-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.ft-auth-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  background: var(--ft-primary-600);
+  color: #ffffff;
+}
+
+.ft-auth-brand-inner {
+  max-width: 24rem;
+  text-align: center;
+}
+
+.ft-auth-brand-title {
+  margin: 0 0 1rem;
+  font-size: 2.25rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.ft-auth-brand-body {
+  margin: 0 0 2rem;
+  color: rgb(255 255 255 / 88%);
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.ft-auth-brand-cta {
+  display: inline-block;
+  padding: 0.75rem 1.5rem;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 16%);
+  color: #ffffff;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.15s ease;
+}
+
+.ft-auth-brand-cta:hover {
+  background: rgb(255 255 255 / 26%);
+}
+
+.ft-auth-panel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--ft-surface-ground);
+}
+
+/* ------------------------------------------------------------------ *
+ * Theme toggle
+ * ------------------------------------------------------------------ */
+
+.ft-theme-toggle {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border: 1px solid var(--ft-border);
+  border-radius: 999px;
+  background: var(--ft-surface-0);
+  color: var(--ft-text-muted);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.ft-theme-toggle:hover {
+  border-color: var(--ft-primary-500);
+  color: var(--ft-primary-600);
+}
+
+.ft-theme-toggle svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.ft-theme-icon--moon {
+  display: none;
+}
+
+:root.ft-dark .ft-theme-icon--sun {
+  display: none;
+}
+
+:root.ft-dark .ft-theme-icon--moon {
+  display: block;
+}
+
+@media (max-width: 900px) {
+  .ft-auth-shell {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .ft-auth-brand {
+    display: none;
+  }
+
+  .ft-auth-panel {
+    min-height: 100vh;
+  }
+}
+
+/* The realm's displayNameHtml renders here as a small wordmark above the
+   page title — deliberately understated since the aside panel carries the
+   bulk of the branding. */
+#kc-header-wrapper.pf-v5-c-brand {
+  margin-bottom: 2rem;
+  color: var(--ft-text-muted) !important;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+#kc-header-wrapper.pf-v5-c-brand * {
+  color: inherit !important;
+}
+
+.pf-v5-c-login__container {
+  --pf-v5-c-login__container--MaxWidth: 22rem;
+}
+
+.pf-v5-c-login__main {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+#kc-page-title {
+  color: var(--ft-text);
+  font-size: 2.25rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/* ------------------------------------------------------------------ *
+ * Form controls
+ * ------------------------------------------------------------------ */
+
+/*
+ * PatternFly draws its input border with ::before/::after pseudo-elements
+ * rather than a real `border`, and their colors (#f0f0f0 light / #57585a
+ * dark) aren't exposed as overridable custom properties. Left alone they
+ * paint on top of any border we set on the element itself, which is why
+ * the fields kept reading as stock Keycloak. Killing them and drawing a
+ * filled, borderless box ourselves is the only reliable fix.
+ */
+.pf-v5-c-form-control::before,
+.pf-v5-c-form-control::after {
+  content: none;
+}
+
+.pf-v5-c-form-control {
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background-color: var(--ft-surface-100);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.pf-v5-c-form-control:hover {
+  background-color: var(--ft-surface-200);
+}
+
+.pf-v5-c-form-control:focus-within {
+  border-color: var(--ft-primary-500);
+  background-color: var(--ft-surface-0);
+  box-shadow: 0 0 0 3px var(--ft-focus-ring);
+}
+
+.pf-v5-c-form-control > input,
+.pf-v5-c-form-control > select {
+  padding-block: 0.85rem;
+}
+
+/* Password field + visibility-toggle button: PatternFly joins input-group
+   items flush (negative margin so borders overlap), which reads as too
+   tight now that the field is a filled, borderless box. Add a small gap and
+   cancel that overlap. */
+.pf-v5-c-input-group {
+  gap: 0.5rem;
+}
+
+.pf-v5-c-input-group > .pf-v5-c-input-group__item:not(:first-child) {
+  margin-inline-start: 0;
+}
+
+.pf-v5-c-form__label-text {
+  color: var(--ft-text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.pf-v5-c-form__group {
+  margin-bottom: 1.25rem;
+}
+
+.pf-v5-c-button {
+  border-radius: 0.5rem;
+  font-weight: 600;
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.pf-v5-c-button.pf-m-primary {
+  box-shadow: 0 1px 2px rgb(5 150 105 / 32%);
+}
+
+.pf-v5-c-button.pf-m-primary:hover {
+  box-shadow: 0 2px 6px rgb(5 150 105 / 38%);
+}
+
+/* Submit buttons span the card, matching the app's dialog actions. */
+#kc-form-buttons .pf-v5-c-button,
+#kc-form-buttons input[type='submit'] {
+  width: 100%;
+}
+
+/* On wide screens the aside panel's CTA already covers "no account yet? /
+   already have one?", so the page's own copy of that link would be
+   redundant. It's hidden here and restored (as `block`/`inline-flex`) in
+   the mobile media query below once the aside disappears. */
+#kc-registration-container,
+#kc-form-options {
+  display: none;
+}
+
+#kc-reset-password-form .pf-v5-c-button.pf-m-secondary {
+  display: none;
+}
+
+/* Mobile-only overrides for the two rules above. Kept below them (rather
+   than inside the earlier `@media (max-width: 900px)` block) so it actually
+   wins the cascade: two rules of equal (ID) specificity resolve by source
+   order regardless of which one sits inside a media query, so a later
+   unconditional rule always beats an earlier media-gated one. Previously
+   this order was reversed, which made the sign-up and back-to-sign-in links
+   vanish on mobile even though the media query "restored" them. */
+@media (max-width: 900px) {
+  /* The aside's CTA (register/sign-in link) is hidden along with it, so the
+     page's own copy of that link needs to come back for mobile visitors. */
+  #kc-registration-container,
+  #kc-form-options {
+    display: block;
+  }
+
+  #kc-reset-password-form .pf-v5-c-button.pf-m-secondary {
+    display: inline-flex;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Registration link + identity providers
+ * ------------------------------------------------------------------ */
+
+#kc-registration,
+#kc-registration-container,
+#kc-form-options {
+  margin-top: 1.25rem;
+  color: var(--ft-text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+#kc-registration a,
+#kc-registration-container a,
+#kc-form-options a {
+  color: var(--ft-primary-600);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+#kc-registration a:hover,
+#kc-registration-container a:hover,
+#kc-form-options a:hover {
+  text-decoration: underline;
+}
+
+/*
+ * Social login buttons (the "Sign in with Google" row once an identity provider
+ * is configured). Rendered as circular, brand-colored icon buttons — Keycloak
+ * only outputs the bare SVG (no label) when the provider has iconClasses, which
+ * is the case for every provider it ships an icon for.
+ */
+.pf-v5-c-login__main-footer-band > .pf-v5-c-login__main-footer-band-item {
+  margin-bottom: 0.75rem;
+  color: var(--ft-text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+#kc-social-providers .pf-v5-c-login__main-footer-links {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+#kc-social-providers .pf-v5-c-login__main-footer-links-item-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 999px;
+  background: var(--ft-surface-200);
+  color: #ffffff;
+  text-decoration: none;
+  transition: filter 0.15s ease;
+}
+
+#kc-social-providers .pf-v5-c-login__main-footer-links-item-link svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: currentColor;
+}
+
+#kc-social-providers .pf-v5-c-login__main-footer-links-item-link:hover {
+  filter: brightness(1.08);
+}
+
+/* Brand colors per provider — Keycloak ships icons for these out of the box. */
+#social-facebook {
+  background: #1877f2;
+}
+
+#social-google {
+  background: #ea4335;
+}
+
+#social-github {
+  background: #24292e;
+}
+
+#social-linkedin,
+#social-linkedin-openid-connect {
+  background: #0a66c2;
+}
+
+#social-microsoft {
+  background: #2f2f2f;
+}
+
+#social-gitlab {
+  background: #fc6d26;
+}
+
+/* ------------------------------------------------------------------ *
+ * Accessibility
+ * ------------------------------------------------------------------ */
+
+/* Matches the app's global :focus-visible rule (WCAG 2.4.7). */
+:focus-visible {
+  outline: 2px solid var(--ft-primary-500);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pf-v5-c-form-control,
+  .pf-v5-c-button,
+  .ft-theme-toggle,
+  #kc-social-providers .pf-v5-c-login__main-footer-links-item-link {
+    transition: none;
+  }
+}
